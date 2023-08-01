@@ -32,6 +32,7 @@ def predict_labels(inputs, model_path, labels):
 Part for inferernce
 """
 
+
 def lambda_handler(event, context):
     print(event)
     # version check
@@ -78,7 +79,9 @@ def lambda_handler(event, context):
     print(inputs)
 
     labels = [0, 1, 2, 3, 4, 5, 6]  # Replaced with our own label names
-    model_path = "./test_trainer_best_model_0728_teache student, data follows distribution/checkpoint-3374"  # checkpoint path for fine-tuned model
+    model_path = (
+        "/var/task/klue_finetuned_distilled_ckpt/3-klue_distilled/checkpoint-3856"
+    )
     ar = []  # to store predictd labels
     dc = {}  # to count predicted labels
     predicted_labels = predict_labels(
@@ -94,9 +97,48 @@ def lambda_handler(event, context):
             dc[value] += 1
         else:
             dc[value] = 1
+    total = 0
     for d in dc:
+        total += dc[d]
         print(f"label: {d}, count: {dc[d]}\n")
-        
+
     # gpt글 reject 기준
-    
-    
+    check = 0
+    for label in range(3, 7):
+        if label in dc:
+            check += dc[label]
+
+    if check / total > 0.5:
+        print("reject")
+        # sqs 재전송 (SQS_make_story)
+        try:
+            # 최종 처리는 sqs에 연결된 lambda가 진행
+            sqs = boto3.resource("sqs", region_name="ap-northeast-2")
+            queue = sqs.get_queue_by_name(QueueName=f"SQS_make_story_{env}")
+
+            temp_json = {}
+            temp_json["user_id"] = user_id
+            temp_json["time_stamp"] = time_stamp
+            message_body = json.dumps(temp_json)
+            response = queue.send_message(
+                MessageBody=message_body,
+            )
+        except:
+            print("sqs fail!")
+    else:
+        try:
+            # to SQS_post_midjourney_story
+            sqs = boto3.resource("sqs", region_name="ap-northeast-2")
+            queue = sqs.get_queue_by_name(QueueName=f"SQS_post_midjourney_story_{env}")
+            temp_json = {}
+            temp_json["user_id"] = user_id
+            temp_json["time_stamp"] = time_stamp
+            message_body = json.dumps(temp_json)
+            response = queue.send_message(
+                MessageBody=message_body,
+            )
+        except:
+            print("sqs fail!")
+
+    print("good")
+    return {"statusCode": 200, "body": json.dumps("Hello from Lambda!")}
